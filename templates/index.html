@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Rockfall &amp; Landslide Early Warning System</title>
+    <meta name="description" content="Real-time rockfall and landslide monitoring dashboard with camera motion detection, vibration sensing, and tilt angle tracking." />
+
+    <!-- Styles -->
+    <link rel="stylesheet" href="/static/style.css" />
+
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+
+    <!-- Socket.IO -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.8.1/socket.io.min.js"></script>
+    <!-- QR Code generator -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+</head>
+<body>
+
+    <!-- ═══ Header ═══ -->
+    <header class="header">
+        <div class="header-inner">
+            <div class="logo">
+                <div class="logo-icon">🪨</div>
+                <span class="logo-text">Rockfall Warning System</span>
+            </div>
+            <div class="header-status">
+                <div id="connection-badge" class="status-badge offline">
+                    <span id="connection-dot" class="status-dot"></span>
+                    <span id="connection-text">Connecting…</span>
+                </div>
+                <span id="clock" class="clock">00:00:00</span>
+            </div>
+        </div>
+    </header>
+
+    <!-- ═══ Main ═══ -->
+    <main class="main">
+
+        <!-- Alert Banner -->
+        <div id="alert-banner" class="alert-banner">
+            <div class="alert-icon">🚨</div>
+            <div class="alert-content">
+                <div class="alert-title">Red Alert — Potential Rockfall / Landslide</div>
+                <div id="alert-reasons" class="alert-reasons"></div>
+            </div>
+            <button id="alert-dismiss" class="alert-dismiss">Dismiss</button>
+        </div>
+
+        <!-- Top Row: Camera + Stats -->
+        <section class="top-row">
+            <!-- Camera -->
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-title">
+                        <span class="card-title-icon camera">📷</span>
+                        Live Camera — Motion Detection
+                    </div>
+                    <span id="cam-badge" class="card-badge live">● Live</span>
+                </div>
+                <div class="card-body">
+                    <div class="camera-feed">
+                        <img id="camera-stream" src="/video" alt="Live camera feed" />
+                        <div class="camera-overlay">
+                            <span class="camera-label" id="cam-label">
+                                <span class="rec-dot"></span>
+                                OpenCV Motion Detection
+                            </span>
+                        </div>
+                    </div>
+                    <!-- No-camera notice (shown dynamically) -->
+                    <div id="no-cam-notice" class="no-cam-notice" style="display:none;">
+                        📷 Camera not connected — running in <strong>sensor-only mode</strong>.
+                        Vibration &amp; tilt from your phone are still monitored.
+                    </div>
+                </div>
+            </div>
+
+            <!-- Stats Panel -->
+            <aside class="stats-panel">
+                <div class="stat-card">
+                    <div class="stat-label">Vibration (m/s²)</div>
+                    <div id="vibration-value" class="stat-value vibration-val">0.0</div>
+                    <div class="stat-bar">
+                        <div id="vibration-bar-fill" class="stat-bar-fill vibration-bar" style="width: 0%"></div>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Tilt Angle (°)</div>
+                    <div id="tilt-value" class="stat-value tilt-val">0.0°</div>
+                    <div class="stat-bar">
+                        <div id="tilt-bar-fill" class="stat-bar-fill tilt-bar" style="width: 0%"></div>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">System Status</div>
+                    <div id="system-status" class="stat-value status-val">NORMAL</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Thresholds</div>
+                    <div style="font-size: 0.82rem; color: var(--text-secondary); line-height: 1.8; margin-top: 4px;">
+                        <span style="color: var(--accent-amber);">Vibration:</span> 15 m/s²<br/>
+                        <span style="color: var(--accent-emerald);">Tilt:</span> 30°<br/>
+                        <span style="color: var(--accent-indigo);">Contour Area:</span> 5000 px
+                    </div>
+                </div>
+            </aside>
+        </section>
+
+        <!-- Graphs Row -->
+        <section class="graphs-row">
+            <!-- Vibration Graph -->
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-title">
+                        <span class="card-title-icon vibration">📊</span>
+                        Vibration Graph
+                    </div>
+                    <span class="card-badge realtime">Real-time</span>
+                </div>
+                <div class="card-body">
+                    <div class="chart-container">
+                        <canvas id="vibration-chart"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tilt Graph -->
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-title">
+                        <span class="card-title-icon tilt">📐</span>
+                        Tilt Angle Graph
+                    </div>
+                    <span class="card-badge realtime">Real-time</span>
+                </div>
+                <div class="card-body">
+                    <div class="chart-container">
+                        <canvas id="tilt-chart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Phone Connect Section -->
+        <section class="phone-section">
+            <div class="phone-title">📱 Connect Your Phone as Sensor</div>
+
+            <div class="connect-grid">
+                <!-- QR Code box -->
+                <div class="qr-box">
+                    <div id="qr-code"></div>
+                    <div class="qr-hint">Scan with your phone camera</div>
+                </div>
+
+                <!-- URL + steps -->
+                <div class="connect-info">
+                    <div class="phone-url" id="phone-url">Detecting network address…</div>
+
+                    <ol class="phone-steps">
+                        <li>Connect phone &amp; laptop to the <strong>same WiFi</strong>.</li>
+                        <li>Scan the QR code <em>or</em> open the URL in Chrome/Safari.</li>
+                        <li><strong>iOS only:</strong> tap <em>"Enable Motion Sensors"</em> → Allow.</li>
+                        <li>Keep the browser tab open — data streams automatically.</li>
+                    </ol>
+
+                    <div class="ngrok-tip" id="ngrok-tip" style="display:none;">
+                        <span class="ngrok-badge">🌐 ngrok</span>
+                        <span id="ngrok-url-text"></span>
+                    </div>
+
+                    <div class="alt-methods">
+                        <div class="alt-title">⚡ Not working? Try these:</div>
+                        <div class="alt-item">
+                            <span class="alt-num">1</span>
+                            <div>
+                                <strong>ngrok HTTPS tunnel</strong> — works even on different networks &amp; fixes iOS sensor permission<br/>
+                                <code>ngrok http 5001</code> → open the <code>https://….ngrok-free.app/sensor</code> URL on your phone
+                            </div>
+                        </div>
+                        <div class="alt-item">
+                            <span class="alt-num">2</span>
+                            <div>
+                                <strong>USB Tethering (Android)</strong> — plug in USB cable, enable USB tethering in phone settings, laptop IP becomes reachable
+                            </div>
+                        </div>
+                        <div class="alt-item">
+                            <span class="alt-num">3</span>
+                            <div>
+                                <strong>Mobile Hotspot</strong> — create hotspot on phone, connect laptop to it, then open <code>http://172.20.10.1:5001/sensor</code> — <em>won't work</em> (server is on laptop). Instead connect both to a router.
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+    </main>
+
+    <!-- Scripts -->
+    <script src="/static/script.js"></script>
+</body>
+</html>

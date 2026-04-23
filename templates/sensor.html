@@ -1,0 +1,530 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+    <title>Rockfall Sensor</title>
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800;900&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.8.1/socket.io.min.js"></script>
+    <style>
+        :root {
+            --bg: #08091a;
+            --card: #12182e;
+            --border: rgba(99,102,241,0.2);
+            --indigo: #818cf8;
+            --amber: #fbbf24;
+            --emerald: #34d399;
+            --red: #f87171;
+            --rose: #fb7185;
+            --text: #f1f5f9;
+            --muted: #64748b;
+            --secondary: #94a3b8;
+        }
+        *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+        html, body { height:100%; font-family:'Inter',sans-serif; background:var(--bg); color:var(--text); overflow:hidden; }
+
+        /* ═══════════════════════════════════════════
+           PERMISSION SPLASH — covers entire screen
+        ═══════════════════════════════════════════ */
+        #splash {
+            position: fixed; inset: 0; z-index: 999;
+            display: flex; flex-direction: column;
+            align-items: center; justify-content: center;
+            gap: 28px;
+            background:
+                radial-gradient(ellipse at 30% 20%, rgba(99,102,241,0.25) 0%, transparent 60%),
+                radial-gradient(ellipse at 70% 80%, rgba(139,92,246,0.2) 0%, transparent 60%),
+                #08091a;
+            cursor: pointer;
+            user-select: none;
+            -webkit-user-select: none;
+            transition: opacity 0.5s ease;
+        }
+        #splash.hide {
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        .splash-pulse {
+            width: 120px; height: 120px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #6366f1, #8b5cf6);
+            display: flex; align-items: center; justify-content: center;
+            font-size: 3.2rem;
+            box-shadow:
+                0 0 0 0 rgba(99,102,241,0.5),
+                0 0 40px rgba(99,102,241,0.4);
+            animation: ripple 2s ease-in-out infinite;
+        }
+        @keyframes ripple {
+            0%   { box-shadow: 0 0 0 0 rgba(99,102,241,0.5), 0 0 40px rgba(99,102,241,0.4); }
+            50%  { box-shadow: 0 0 0 30px rgba(99,102,241,0), 0 0 60px rgba(99,102,241,0.3); }
+            100% { box-shadow: 0 0 0 0 rgba(99,102,241,0.5), 0 0 40px rgba(99,102,241,0.4); }
+        }
+
+        .splash-title {
+            font-size: 1.6rem; font-weight: 900;
+            text-align: center; line-height: 1.2;
+            background: linear-gradient(135deg, #c7d2fe, #818cf8);
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+            padding: 0 24px;
+        }
+        .splash-sub {
+            font-size: 0.95rem; color: var(--secondary);
+            text-align: center; line-height: 1.6;
+            padding: 0 32px; max-width: 340px;
+        }
+        .splash-tap-hint {
+            display: flex; flex-direction: column; align-items: center; gap: 10px;
+            margin-top: 12px;
+        }
+        .tap-circle {
+            width: 64px; height: 64px; border-radius: 50%;
+            background: rgba(99,102,241,0.15);
+            border: 2px solid rgba(99,102,241,0.4);
+            display: flex; align-items: center; justify-content: center;
+            font-size: 1.8rem;
+            animation: tap-bounce 1.6s ease-in-out infinite;
+        }
+        @keyframes tap-bounce {
+            0%,100% { transform: scale(1); opacity:0.8; }
+            50%      { transform: scale(1.12); opacity:1; }
+        }
+        .tap-text {
+            font-size: 0.8rem; font-weight: 700;
+            color: var(--indigo); text-transform: uppercase;
+            letter-spacing: 0.1em;
+            animation: tap-bounce 1.6s ease-in-out infinite;
+        }
+
+        /* Android auto-start notice (no tap needed) */
+        .android-badge {
+            background: rgba(52,211,153,0.12);
+            border: 1px solid rgba(52,211,153,0.3);
+            color: var(--emerald);
+            border-radius: 100px;
+            padding: 6px 18px;
+            font-size: 0.78rem; font-weight: 700;
+            display: none;
+        }
+
+        /* ═══════════════════════════════════════════
+           MAIN SENSOR DASHBOARD
+        ═══════════════════════════════════════════ */
+        #dashboard {
+            display: none;
+            flex-direction: column;
+            height: 100vh;
+            overflow-y: auto;
+        }
+        #dashboard.show { display: flex; }
+
+        /* Header */
+        .header {
+            background: rgba(8,9,26,0.95);
+            backdrop-filter: blur(16px);
+            border-bottom: 1px solid var(--border);
+            padding: 14px 20px;
+            display: flex; align-items: center; justify-content: space-between;
+            flex-shrink: 0;
+            position: sticky; top: 0; z-index: 10;
+        }
+        .logo { display:flex; align-items:center; gap:10px; }
+        .logo-icon {
+            width:36px; height:36px;
+            background: linear-gradient(135deg,#6366f1,#8b5cf6);
+            border-radius:10px; display:flex; align-items:center;
+            justify-content:center; font-size:1.1rem;
+            box-shadow: 0 0 16px rgba(99,102,241,0.35);
+        }
+        .logo-text {
+            font-size:0.95rem; font-weight:800;
+            background:linear-gradient(135deg,#c7d2fe,#818cf8);
+            -webkit-background-clip:text; -webkit-text-fill-color:transparent;
+        }
+        .ws-badge {
+            display:flex; align-items:center; gap:6px;
+            padding:5px 12px; border-radius:100px;
+            font-size:0.7rem; font-weight:700; text-transform:uppercase; letter-spacing:0.05em;
+        }
+        .ws-badge.connecting { background:rgba(251,191,36,0.12); color:var(--amber); border:1px solid rgba(251,191,36,0.3); }
+        .ws-badge.connected  { background:rgba(52,211,153,0.12); color:var(--emerald); border:1px solid rgba(52,211,153,0.3); }
+        .ws-badge.error      { background:rgba(248,113,113,0.12); color:var(--red); border:1px solid rgba(248,113,113,0.3); }
+        .badge-dot { width:7px; height:7px; border-radius:50%; background:currentColor; animation:blink 1.5s ease-in-out infinite; }
+        @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.35} }
+
+        /* Content */
+        .content { flex:1; padding:18px 16px 32px; display:flex; flex-direction:column; gap:14px; max-width:480px; margin:0 auto; width:100%; }
+
+        /* Stream indicator */
+        .stream-bar {
+            background:var(--card); border:1px solid var(--border); border-radius:14px;
+            padding:14px 18px; display:flex; align-items:center; justify-content:space-between;
+        }
+        .stream-left { display:flex; align-items:center; gap:10px; }
+        .stream-dot { width:10px; height:10px; border-radius:50%; background:var(--muted); transition:background 0.3s; }
+        .stream-dot.active { background:var(--emerald); animation:blink 0.6s ease infinite; }
+        .stream-label { font-size:0.82rem; color:var(--secondary); font-weight:500; }
+        .stream-rate { font-family:'JetBrains Mono'; font-size:0.78rem; color:var(--indigo); }
+
+        /* Sensor cards */
+        .sensor-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+        .sensor-card {
+            background:var(--card); border:1px solid var(--border); border-radius:16px;
+            padding:20px 14px; display:flex; flex-direction:column; align-items:center; gap:8px;
+            transition: border-color 0.3s, box-shadow 0.3s;
+        }
+        .sensor-card.alert-card { border-color:rgba(248,113,113,0.6); box-shadow:0 0 24px rgba(248,113,113,0.2); }
+        .sensor-icon { font-size:1.9rem; }
+        .sensor-label { font-size:0.65rem; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:0.08em; }
+        .sensor-value { font-family:'JetBrains Mono'; font-size:2.2rem; font-weight:700; letter-spacing:-0.02em; }
+        .sensor-value.vib { color:var(--amber); }
+        .sensor-value.tilt { color:var(--emerald); }
+        .sensor-value.over { color:var(--red) !important; animation:pulse-val 0.7s ease infinite alternate; }
+        @keyframes pulse-val { 0%{opacity:0.6} 100%{opacity:1} }
+        .sensor-unit { font-size:0.65rem; color:var(--muted); }
+        .sensor-bar { width:100%; height:4px; background:rgba(255,255,255,0.06); border-radius:100px; overflow:hidden; }
+        .sensor-bar-fill { height:100%; border-radius:100px; transition:width 0.35s ease; }
+        .sensor-bar-fill.vib-fill  { background:linear-gradient(90deg,var(--amber),#f59e0b); }
+        .sensor-bar-fill.tilt-fill { background:linear-gradient(90deg,var(--emerald),#10b981); }
+        .sensor-bar-fill.danger    { background:linear-gradient(90deg,var(--red),var(--rose)) !important; }
+
+        /* XYZ card */
+        .xyz-card { background:var(--card); border:1px solid var(--border); border-radius:16px; padding:16px 18px; }
+        .xyz-title { font-size:0.68rem; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:0.08em; margin-bottom:12px; }
+        .xyz-row { display:flex; gap:8px; }
+        .xyz-item { flex:1; background:rgba(255,255,255,0.03); border:1px solid var(--border); border-radius:10px; padding:10px 8px; text-align:center; }
+        .xyz-axis { font-size:0.62rem; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:0.06em; margin-bottom:4px; }
+        .xyz-val { font-family:'JetBrains Mono'; font-size:0.9rem; font-weight:600; color:var(--indigo); }
+
+        /* Status card */
+        .status-card {
+            background:var(--card); border:1px solid var(--border); border-radius:16px;
+            padding:20px; display:flex; align-items:center; gap:16px;
+            transition: all 0.3s ease;
+        }
+        .status-card.ok { border-color:rgba(52,211,153,0.25); }
+        .status-card.danger {
+            background:linear-gradient(135deg, rgba(239,68,68,0.15), rgba(249,115,22,0.1));
+            border-color:rgba(239,68,68,0.5);
+            box-shadow:0 0 32px rgba(239,68,68,0.25);
+            animation:flash-card 1s ease infinite alternate;
+        }
+        @keyframes flash-card { 0%{box-shadow:0 0 32px rgba(239,68,68,0.2)} 100%{box-shadow:0 0 56px rgba(239,68,68,0.45)} }
+        .status-icon { font-size:2.2rem; }
+        .status-card.danger .status-icon { animation:shake 0.4s ease infinite alternate; }
+        @keyframes shake { 0%{transform:rotate(-6deg)} 100%{transform:rotate(6deg)} }
+        .status-info { flex:1; }
+        .status-title { font-size:1rem; font-weight:800; }
+        .status-sub { font-size:0.78rem; color:var(--secondary); margin-top:4px; }
+        .status-card.ok .status-title { color:var(--emerald); }
+        .status-card.danger .status-title { color:var(--red); }
+
+        /* Footer */
+        .footer { text-align:center; font-size:0.75rem; color:var(--muted); padding:4px 0 8px; }
+        .footer a { color:var(--indigo); text-decoration:none; font-weight:600; }
+    </style>
+</head>
+<body>
+
+<!-- ════════════════════════════════════════════════════
+     PERMISSION SPLASH SCREEN
+════════════════════════════════════════════════════ -->
+<div id="splash">
+    <div class="splash-pulse">🪨</div>
+
+    <div class="splash-title">Rockfall Sensor<br/>Ready to Activate</div>
+
+    <div class="splash-sub" id="splash-sub">
+        This app reads your phone's <strong>motion &amp; tilt sensors</strong>
+        to stream live data to the monitoring dashboard.
+    </div>
+
+    <div class="android-badge" id="android-badge">
+        ✅ Android detected — starting automatically…
+    </div>
+
+    <div class="splash-tap-hint" id="tap-hint">
+        <div class="tap-circle">👆</div>
+        <div class="tap-text">Tap anywhere to enable sensors</div>
+    </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════
+     MAIN SENSOR DASHBOARD
+════════════════════════════════════════════════════ -->
+<div id="dashboard">
+    <header class="header">
+        <div class="logo">
+            <div class="logo-icon">🪨</div>
+            <span class="logo-text">Phone Sensor — Live</span>
+        </div>
+        <div id="ws-badge" class="ws-badge connecting">
+            <span class="badge-dot"></span>
+            <span id="ws-text">Connecting…</span>
+        </div>
+    </header>
+
+    <div class="content">
+
+        <!-- Streaming indicator -->
+        <div class="stream-bar">
+            <div class="stream-left">
+                <span class="stream-dot" id="stream-dot"></span>
+                <span class="stream-label" id="stream-label">Initialising sensors…</span>
+            </div>
+            <span class="stream-rate" id="stream-rate">—</span>
+        </div>
+
+        <!-- Vibration + Tilt -->
+        <div class="sensor-grid">
+            <div class="sensor-card" id="vib-card">
+                <div class="sensor-icon">📳</div>
+                <div class="sensor-label">Vibration</div>
+                <div class="sensor-value vib" id="vib-val">0.0</div>
+                <div class="sensor-unit">m/s²</div>
+                <div class="sensor-bar"><div class="sensor-bar-fill vib-fill" id="vib-bar" style="width:0%"></div></div>
+            </div>
+            <div class="sensor-card" id="tilt-card">
+                <div class="sensor-icon">📐</div>
+                <div class="sensor-label">Tilt Angle</div>
+                <div class="sensor-value tilt" id="tilt-val">0.0°</div>
+                <div class="sensor-unit">degrees</div>
+                <div class="sensor-bar"><div class="sensor-bar-fill tilt-fill" id="tilt-bar" style="width:0%"></div></div>
+            </div>
+        </div>
+
+        <!-- Raw XYZ -->
+        <div class="xyz-card">
+            <div class="xyz-title">📡 Raw Accelerometer (m/s²)</div>
+            <div class="xyz-row">
+                <div class="xyz-item"><div class="xyz-axis">X</div><div class="xyz-val" id="xyz-x">—</div></div>
+                <div class="xyz-item"><div class="xyz-axis">Y</div><div class="xyz-val" id="xyz-y">—</div></div>
+                <div class="xyz-item"><div class="xyz-axis">Z</div><div class="xyz-val" id="xyz-z">—</div></div>
+            </div>
+        </div>
+
+        <!-- Alert status -->
+        <div class="status-card ok" id="status-card">
+            <div class="status-icon" id="status-icon">✅</div>
+            <div class="status-info">
+                <div class="status-title" id="status-title">All Clear — Normal</div>
+                <div class="status-sub" id="status-sub">Streaming live to dashboard…</div>
+            </div>
+        </div>
+
+        <div class="footer">
+            Dashboard → <a href="/" id="dash-link">http://localhost:5001</a>
+        </div>
+    </div>
+</div>
+
+<script>
+// ── Socket ──────────────────────────────────────────────────
+const socket   = io();
+const wsBadge  = document.getElementById("ws-badge");
+const wsText   = document.getElementById("ws-text");
+
+socket.on("connect",    () => { wsBadge.className = "ws-badge connected"; wsText.textContent = "Connected"; });
+socket.on("disconnect", () => { wsBadge.className = "ws-badge error";     wsText.textContent = "Disconnected"; });
+socket.on("server_info", info => {
+    const link = document.getElementById("dash-link");
+    link.href = `https://${info.local_ip}:5001`;
+    link.textContent = `https://${info.local_ip}:5001`;
+});
+socket.on("update", data => updateStatus(data.alert, data.reasons));
+
+// ── Sensor State ────────────────────────────────────────────
+let latestTilt   = 0;
+let sensorActive = false;
+let lastEmit     = 0;
+const EMIT_MS    = 100;   // 10 Hz
+let pktCount     = 0;
+
+// ── Permission & Sensor Init ────────────────────────────────
+const splash    = document.getElementById("splash");
+const dashboard = document.getElementById("dashboard");
+const tapHint   = document.getElementById("tap-hint");
+const splashSub = document.getElementById("splash-sub");
+
+function showDashboard() {
+    splash.classList.add("hide");
+    setTimeout(() => {
+        splash.style.display = "none";
+        dashboard.classList.add("show");
+    }, 500);
+}
+
+function startSensors() {
+    if (sensorActive) return;
+    sensorActive = true;
+    showDashboard();
+
+    document.getElementById("stream-dot").classList.add("active");
+    document.getElementById("stream-label").textContent = "Streaming live…";
+
+    // Packet rate counter
+    setInterval(() => {
+        document.getElementById("stream-rate").textContent = pktCount + " pkt/s";
+        pktCount = 0;
+    }, 1000);
+
+    window.addEventListener("devicemotion",      handleMotion,      { passive:true });
+    window.addEventListener("deviceorientation", handleOrientation, { passive:true });
+
+    // Keep screen on
+    if ("wakeLock" in navigator) {
+        navigator.wakeLock.request("screen").catch(() => {});
+    }
+}
+
+function requestIOSPermission() {
+    // Must call both in sequence from same user gesture
+    Promise.all([
+        DeviceMotionEvent.requestPermission(),
+        DeviceOrientationEvent.requestPermission()
+    ])
+    .then(([motionState, orientState]) => {
+        if (motionState === "granted") {
+            startSensors();
+        } else {
+            splashSub.innerHTML =
+                "❌ Permission denied.<br/>Go to <strong>Settings → Safari → Motion &amp; Orientation Access</strong> and enable it, then reload.";
+            tapHint.style.display = "none";
+        }
+    })
+    .catch(err => {
+        splashSub.innerHTML = "⚠️ Could not request permission: " + err.message;
+        tapHint.style.display = "none";
+    });
+}
+
+function initSensors() {
+    const needsPermission =
+        typeof DeviceMotionEvent !== "undefined" &&
+        typeof DeviceMotionEvent.requestPermission === "function";
+
+    if (needsPermission) {
+        // iOS 13+ — tap already happened (this fn is called from click handler)
+        requestIOSPermission();
+    } else {
+        // Android / desktop — no permission API, start immediately
+        startSensors();
+    }
+}
+
+// On page load — detect platform and set up splash correctly
+window.addEventListener("load", () => {
+    const isIOS = /iP(hone|od|ad)/.test(navigator.userAgent);
+    const needsPermission =
+        typeof DeviceMotionEvent !== "undefined" &&
+        typeof DeviceMotionEvent.requestPermission === "function";
+
+    if (!needsPermission) {
+        // Android or desktop: show "starting automatically" and go after 1.2s
+        document.getElementById("android-badge").style.display = "block";
+        tapHint.style.display = "none";
+        splashSub.textContent = "Sensors detected — starting automatically…";
+        setTimeout(startSensors, 1200);
+    }
+    // iOS: just show the tap hint (already default)
+});
+
+// Tap anywhere on splash to trigger permission
+splash.addEventListener("click", () => {
+    const needsPermission =
+        typeof DeviceMotionEvent !== "undefined" &&
+        typeof DeviceMotionEvent.requestPermission === "function";
+    if (needsPermission) {
+        // Show "requesting…"
+        tapHint.innerHTML = '<div style="font-size:1.2rem;color:var(--indigo);font-weight:700;animation:blink 1s infinite;">Requesting permission…</div>';
+        requestIOSPermission();
+    } else {
+        startSensors();
+    }
+});
+
+// ── Motion handlers ─────────────────────────────────────────
+function handleMotion(e) {
+    const acc = e.accelerationIncludingGravity;
+    if (!acc) return;
+    const x = acc.x || 0, y = acc.y || 0, z = acc.z || 0;
+
+    document.getElementById("xyz-x").textContent = x.toFixed(2);
+    document.getElementById("xyz-y").textContent = y.toFixed(2);
+    document.getElementById("xyz-z").textContent = z.toFixed(2);
+
+    const mag = Math.sqrt(x*x + y*y + z*z);
+    const vib = Math.max(0, mag - 9.8);
+    updateVib(vib);
+
+    const now = Date.now();
+    if (now - lastEmit >= EMIT_MS) {
+        lastEmit = now;
+        socket.emit("sensor_data", {
+            vibration: parseFloat(vib.toFixed(3)),
+            tilt: parseFloat(latestTilt.toFixed(2)),
+        });
+        pktCount++;
+    }
+}
+
+function handleOrientation(e) {
+    const beta  = Math.abs(e.beta  || 0);
+    const gamma = Math.abs(e.gamma || 0);
+    latestTilt = Math.max(beta, gamma);
+    updateTilt(latestTilt);
+}
+
+// ── UI Updates ──────────────────────────────────────────────
+const VIB_MAX = 40, TILT_MAX = 90, VIB_LIM = 15, TILT_LIM = 30;
+
+function updateVib(v) {
+    const el   = document.getElementById("vib-val");
+    const bar  = document.getElementById("vib-bar");
+    const card = document.getElementById("vib-card");
+    const pct  = Math.min((v / VIB_MAX) * 100, 100);
+    el.textContent  = v.toFixed(1);
+    bar.style.width = pct + "%";
+    const over = v > VIB_LIM;
+    el.className   = over ? "sensor-value vib over" : "sensor-value vib";
+    bar.className  = over ? "sensor-bar-fill vib-fill danger" : "sensor-bar-fill vib-fill";
+    card.className = over ? "sensor-card alert-card" : "sensor-card";
+}
+
+function updateTilt(v) {
+    const el   = document.getElementById("tilt-val");
+    const bar  = document.getElementById("tilt-bar");
+    const card = document.getElementById("tilt-card");
+    const pct  = Math.min((v / TILT_MAX) * 100, 100);
+    el.textContent  = v.toFixed(1) + "°";
+    bar.style.width = pct + "%";
+    const over = v > TILT_LIM;
+    el.className   = over ? "sensor-value tilt over" : "sensor-value tilt";
+    bar.className  = over ? "sensor-bar-fill tilt-fill danger" : "sensor-bar-fill tilt-fill";
+    card.className = over ? "sensor-card alert-card" : "sensor-card";
+}
+
+function updateStatus(alert, reasons) {
+    const card  = document.getElementById("status-card");
+    const icon  = document.getElementById("status-icon");
+    const title = document.getElementById("status-title");
+    const sub   = document.getElementById("status-sub");
+    if (alert) {
+        card.className  = "status-card danger";
+        icon.textContent  = "🚨";
+        title.textContent = "⚠ ALERT — Threshold Exceeded";
+        sub.textContent   = (reasons || []).join(" • ");
+    } else {
+        card.className  = "status-card ok";
+        icon.textContent  = "✅";
+        title.textContent = "All Clear — Normal";
+        sub.textContent   = "Streaming live to dashboard…";
+    }
+}
+</script>
+</body>
+</html>
